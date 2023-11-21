@@ -1,3 +1,5 @@
+import { INERATE_KEY } from "./reactive.js";
+
 const effectStack = [];
 export let aciveEffect;
 
@@ -38,19 +40,36 @@ export const track = (target, key) => {
 };
 
 // 派发更新
-export const trigger = (target, key) => {
+export const trigger = (target, key, type) => {
   const depMap = bucket.get(target);
   if (!depMap) return;
   const deps = depMap.get(key);
-  const newDeps = new Set(deps);
-  newDeps.forEach((effectFn) => {
-    if (effectFn !== aciveEffect) {
-      // 只有当前执行的effect与全局活跃的effect不同才会执行
-      if (effectFn.options.scheduler) {
-        effectFn.options.scheduler(effectFn);
-      } else {
-        effectFn();
+
+  const effectToRun = new Set();
+
+  // 只有 ADD, DELETE 才需要获取与 INERATE_KEY 相关联的副作用函数
+  if (["ADD", "DELETE"].includes(type)) {
+    const iterateEffects = depMap.get(INERATE_KEY);
+    iterateEffects &&
+      iterateEffects.forEach((effectFn) => {
+        if (aciveEffect !== effectFn) {
+          effectToRun.add(effectFn);
+        }
+      });
+  }
+
+  deps &&
+    deps.forEach((effectFn) => {
+      if (effectFn !== aciveEffect) {
+        effectToRun.add(effectFn);
       }
+    });
+
+  effectToRun.forEach((effectFn) => {
+    if (effectFn.options.scheduler) {
+      effectFn.options.scheduler(effectFn);
+    } else {
+      effectFn();
     }
   });
 };
