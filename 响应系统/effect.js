@@ -1,4 +1,4 @@
-import { INERATE_KEY, shouldTrack } from "./reactive.js";
+import { INERATE_KEY, MAP_KEY_INERATE_KEY, shouldTrack } from "./reactive.js";
 
 const effectStack = [];
 export let aciveEffect;
@@ -48,8 +48,24 @@ export const trigger = (target, key, type, newVal) => {
   const effectToRun = new Set();
 
   // 只有 ADD, DELETE 才需要获取与 INERATE_KEY 相关联的副作用函数
-  if (["ADD", "DELETE"].includes(type)) {
+  if (
+    ["ADD", "DELETE"].includes(type) ||
+    (type === "SET" &&
+      Object.prototype.toString.call(target) === "[object Map]")
+  ) {
     const iterateEffects = depMap.get(INERATE_KEY);
+    iterateEffects &&
+      iterateEffects.forEach((effectFn) => {
+        if (aciveEffect !== effectFn) {
+          effectToRun.add(effectFn);
+        }
+      });
+  }
+  if (
+    ["ADD", "DELETE"].includes(type) &&
+    Object.prototype.toString.call(target) === "[object Map]"
+  ) {
+    const iterateEffects = depMap.get(MAP_KEY_INERATE_KEY);
     iterateEffects &&
       iterateEffects.forEach((effectFn) => {
         if (aciveEffect !== effectFn) {

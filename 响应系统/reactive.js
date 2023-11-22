@@ -3,6 +3,7 @@ import { flushJob, jobQueue } from "./flushjob.js";
 import { effect, trigger, track } from "./effect.js";
 
 export const INERATE_KEY = Symbol("INERATE_KEY");
+export const MAP_KEY_INERATE_KEY = Symbol("MAP_KEY_INERATE_KEY");
 export const RAW = Symbol("RAW");
 
 const arrayInstrumentations = {};
@@ -128,6 +129,193 @@ function shallowReactive(target) {
 function readonly(target) {
   return createReactive(target, false, true);
 }
+
+// 扩展集合类型数据的方法
+function iteratorMethod() {
+  const raw = this[RAW];
+  const itr = raw[Symbol.iterator]();
+  const wrap = (v) => (typeof v === "object" ? reactive(v) : v);
+  track(raw, INERATE_KEY);
+  return {
+    next() {
+      const { value, done } = itr.next();
+      return {
+        value: value ? [wrap(value[0]), wrap(value[1])] : value,
+        done,
+      };
+    },
+    [Symbol.iterator]() {
+      return this;
+    },
+  };
+}
+const mutableInstrumentations = {
+  get(key) {
+    const raw = this[RAW];
+    const had = raw.get(key);
+    track(raw, key);
+    if (had) {
+      const res = raw.get(key);
+      return typeof res === "object" ? reactive(res) : res;
+    }
+  },
+  set(key, value) {
+    const raw = this[RAW];
+    const had = raw.has(key);
+    const oldValue = raw.get(key);
+    raw.set(key, value[RAW] ?? value);
+    if (!had) {
+      trigger(target, key, "ADD");
+    } else if (
+      oldValue !== value &&
+      (oldValue == oldValue || value === value)
+    ) {
+      trigger(raw, key, "SET");
+    }
+  },
+  add(key) {
+    const raw = this[RAW];
+    const had = raw.has(key);
+    const res = raw.add(key);
+    !had && trigger(this[RAW], key, "ADD");
+    return res;
+  },
+  delete(key) {
+    const raw = this[RAW];
+    const had = raw.has(key);
+    const res = raw.delete(key);
+    had && trigger(this[RAW], key, "DELETE");
+    return res;
+  },
+
+  forEach(cb, thisArg) {
+    const raw = this[RAW];
+    const wrap = (v) => (typeof v === "object" ? reactive(v) : v);
+    track(raw, INERATE_KEY);
+    raw.forEach((v, k) => {
+      cb.call(thisArg, wrap(v), wrap(k), this);
+    });
+  },
+  [Symbol.iterator]: iteratorMethod,
+  entries: iteratorMethod,
+  values() {
+    const raw = this[RAW];
+    const itr = raw.values();
+    const wrap = (v) => (typeof v === "object" ? reactive(v) : v);
+    track(raw, INERATE_KEY);
+    return {
+      next() {
+        const { value, done } = itr.next();
+        return {
+          value: wrap(value),
+          done,
+        };
+      },
+      [Symbol.iterator]() {
+        return this;
+      },
+    };
+  },
+  keys() {
+    const raw = this[RAW];
+    const itr = raw.keys();
+    const wrap = (v) => (typeof v === "object" ? reactive(v) : v);
+    track(raw, MAP_KEY_INERATE_KEY);
+    return {
+      next() {
+        const { value, done } = itr.next();
+        return {
+          value: wrap(value),
+          done,
+        };
+      },
+      [Symbol.iterator]() {
+        return this;
+      },
+    };
+  },
+};
+// 对集合代理 Set Map
+const createReactiveCollection = (
+  target,
+  isShallow = false,
+  isReadonly = false
+) => {
+  return new Proxy(target, {
+    get(target, key, receiver) {
+      // 内部属性 RAW, 获取原本的对象
+      if (key === RAW) {
+        return target;
+      }
+
+      if (key === "size") {
+        track(target, INERATE_KEY);
+        return Reflect.get(target, key, target);
+      }
+
+      return mutableInstrumentations[key];
+    },
+    set(target, key, newVal, receiver) {
+      console.log("+set", key);
+      if (isReadonly) {
+        console.warn(`属性 ${key} 是只读的`);
+        return true;
+      }
+      const oldVal = target[key];
+      const triggerType = Array.isArray
+        ? Number(key) < target.length
+          ? "SET"
+          : "ADD"
+        : Object.prototype.hasOwnProperty.call(target, key)
+        ? "SET"
+        : "ADD";
+      const v = Reflect.set(target, key, newVal, receiver);
+      // receiver 是 target 的代理对象
+      if (receiver[RAW] === target) {
+        if (oldVal !== newVal && (oldVal === oldVal || newVal === newVal)) {
+          trigger(target, key, triggerType, newVal);
+        }
+      }
+      return v;
+    },
+    // 拦截 delete
+    deleteProperty(target, key) {
+      if (isReadonly) {
+        console.warn(`属性 ${key} 是只读的`);
+        return true;
+      }
+      const had = Object.prototype.hasOwnProperty.call(target, key);
+      const v = Reflect.deleteProperty(target, key);
+      if (had && v) {
+        trigger(target, key, "DELETE");
+      }
+      return v;
+    },
+
+    // 拦截 in 操作符
+    has(target, key) {
+      track(target, key);
+      return Reflect.has(target, key);
+    },
+
+    // 拦截 for...in
+    // 在 trigger 中会取与 INERATE_KEY 相关连的 effectfn 执行
+    ownKeys(target) {
+      track(target, Array.isArray(target) ? "length" : INERATE_KEY);
+      return Reflect.ownKeys(target);
+    },
+  });
+};
+const reactiveCollectionMap = new Map();
+
+const reactiveCollection = (target) => {
+  if (reactiveCollectionMap.has(target))
+    return reactiveCollectionMap.get(target);
+
+  const proxy = createReactiveCollection(target);
+  reactiveCollectionMap.set(target, proxy);
+  return proxy;
+};
 
 const obj = {
   foo: 1,
