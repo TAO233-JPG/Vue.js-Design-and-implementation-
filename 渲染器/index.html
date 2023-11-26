@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>渲染器</title>
+  </head>
+  <body>
+    <h1>渲染器</h1>
+    <div id="app"></div>
+    <button id="btn">+1</button>
+    <script type="module">
+      import {
+        effect,
+        ref,
+      } from "https://unpkg.com/vue@3/dist/vue.esm-browser.js";
+      import { createRenderer } from "./renderer.js";
+      import {
+        createElement,
+        insert,
+        setElementText,
+        patchProps,
+        unmount,
+        createText,
+        setText,
+      } from "./api/browser.js";
+
+      const render = createRenderer({
+        createElement,
+        insert,
+        setElementText,
+        patchProps,
+        unmount,
+        createText,
+        setText,
+      });
+
+      const counts = ref(0);
+      const container = document.querySelector("#app");
+      effect(() => {
+        render(
+          {
+            type: "div",
+            children: [
+              { type: "h3", children: "hello" },
+              {
+                type: "p",
+                children: `V ${counts.value}`,
+              },
+            ],
+          },
+          container
+        );
+      });
+
+      document
+        .querySelector("#btn")
+        .addEventListener("click", () => counts.value++);
+    </script>
+  </body>
+</html>
